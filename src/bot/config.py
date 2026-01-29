@@ -26,6 +26,9 @@ class BotConfig:
     preferred_output_format: str
     cookie_file: Optional[Path]
     browser_cookies: Optional[str]
+    cookie_auto_refresh: bool
+    cookie_refresh_max_age_seconds: Optional[int]
+    cookie_refresh_command: Optional[str]
     js_runtime: Optional[str]
     auto_setup_deno: bool
 
@@ -102,6 +105,15 @@ def load_config() -> BotConfig:
     cookie_file_raw = os.environ.get("YTSAGE_COOKIE_FILE", "").strip()
     cookie_file = Path(cookie_file_raw).expanduser().resolve() if cookie_file_raw else None
     browser_cookies = os.environ.get("YTSAGE_COOKIES_FROM_BROWSER", "").strip() or None
+    cookie_auto_refresh = os.environ.get("YTSAGE_COOKIE_AUTO_REFRESH", "false").lower() in {"1", "true", "yes"}
+    cookie_refresh_command = os.environ.get("YTSAGE_COOKIE_REFRESH_COMMAND", "").strip() or None
+    cookie_refresh_max_age_raw = os.environ.get("YTSAGE_COOKIE_REFRESH_MAX_AGE_HOURS", "").strip()
+    cookie_refresh_max_age_seconds: Optional[int] = None
+    if cookie_refresh_max_age_raw:
+        try:
+            cookie_refresh_max_age_seconds = int(float(cookie_refresh_max_age_raw) * 3600)
+        except ValueError:
+            logger.warning("Invalid YTSAGE_COOKIE_REFRESH_MAX_AGE_HOURS value; ignoring")
     js_runtime = os.environ.get("YTSAGE_JS_RUNTIME", "").strip() or None
     auto_setup_deno = os.environ.get("YTSAGE_AUTO_SETUP_DENO", "true").lower() in {"1", "true", "yes"}
 
@@ -118,6 +130,9 @@ def load_config() -> BotConfig:
         preferred_output_format=preferred_output_format,
         cookie_file=cookie_file,
         browser_cookies=browser_cookies,
+        cookie_auto_refresh=cookie_auto_refresh,
+        cookie_refresh_max_age_seconds=cookie_refresh_max_age_seconds,
+        cookie_refresh_command=cookie_refresh_command,
         js_runtime=js_runtime,
         auto_setup_deno=auto_setup_deno,
     )

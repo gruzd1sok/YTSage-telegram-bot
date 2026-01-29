@@ -4,3 +4,5 @@ loguru>=0.7.3
 python-telegram-bot>=21.0
 python-dotenv>=1.0.1
 setuptools>=80.9.0
+browser-cookie3>=0.19.1
+browser-cookie3>=0.20.1

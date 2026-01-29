@@ -32,12 +32,17 @@ python main.py
 - `YTSAGE_PREFERRED_OUTPUT_FORMAT` (optional): output container if forced (default: mp4)
 - `YTSAGE_COOKIE_FILE` (optional): path to cookies.txt for age/region restricted content
 - `YTSAGE_COOKIES_FROM_BROWSER` (optional): browser cookie source string for yt-dlp (e.g. `chrome`, `chrome:Default`)
+- `YTSAGE_COOKIE_AUTO_REFRESH` (optional): auto-refresh cookies file when expired (default: false)
+- `YTSAGE_COOKIE_REFRESH_MAX_AGE_HOURS` (optional): refresh if cookie file is older than this many hours
+- `YTSAGE_COOKIE_REFRESH_COMMAND` (optional): shell command to regenerate cookies file
 - `YTSAGE_JS_RUNTIME` (optional): JS runtime string for yt-dlp (e.g. `deno:/path/to/deno`)
 - `YTSAGE_AUTO_SETUP_DENO` (optional): auto-download Deno for JS runtime (default: true)
 
 ## Notes
 - The bot relies on `yt-dlp` and `ffmpeg` available on PATH or in the YTSage app bin directory.
 - Some YouTube videos require a JS runtime or cookies; set the env vars above if you see HTTP 403 errors.
+- Auto-refresh can use `YTSAGE_COOKIES_FROM_BROWSER` with `browser-cookie3` installed, or a custom
+  `YTSAGE_COOKIE_REFRESH_COMMAND` (supports `{cookie_file}`, `{browser}`, `{profile}` placeholders).
 - This repository intentionally removes the GUI entrypoint and focuses on the Telegram interface.
 
 ## License
