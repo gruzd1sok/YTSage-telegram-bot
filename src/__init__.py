@@ -1,7 +1,7 @@
 """
-YTSage - YouTube Video Downloader
+YTSage Telegram Bot
 
-A modern, user-friendly YouTube video downloader built with PySide6.
+Forked from oop7/YTSage and adapted for a Telegram bot interface.
 """
 
 __version__ = "4.9.7"

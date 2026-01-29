@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from typing import Union
 from pathlib import Path
 
 import requests
@@ -118,7 +119,7 @@ def get_ffmpeg_install_path() -> Path:
 
 
 
-def get_ffmpeg_path() -> str | Path:
+def get_ffmpeg_path() -> Union[str, Path]:
     """
     Get the FFmpeg executable path, either from PATH or installation directory.
     Returns:

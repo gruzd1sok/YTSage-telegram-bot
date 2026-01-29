@@ -5,13 +5,15 @@ import shlex  # For safely parsing command arguments
 import signal
 import subprocess  # For direct CLI command execution
 import sys
+import threading
+from collections import deque
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Set
-
-from PySide6.QtCore import QObject, QThread, Signal
+from typing import Callable, Optional, List, Set
 
 from src.core.ytsage_yt_dlp import get_yt_dlp_path
+from src.core.ytsage_ffmpeg import check_ffmpeg_installed
 from src.utils.ytsage_constants import SUBPROCESS_CREATIONFLAGS
 from src.utils.ytsage_localization import LocalizationManager
 from src.utils.ytsage_logger import logger
@@ -20,24 +22,33 @@ from src.utils.ytsage_logger import logger
 _ = LocalizationManager.get_text
 
 
-class SignalManager(QObject):
-    update_formats = Signal(list)
-    update_status = Signal(str)
-    update_progress = Signal(float)
-    playlist_info_label_visible = Signal(bool)
-    playlist_info_label_text = Signal(str)
-    selected_subs_label_text = Signal(str)
-    playlist_select_btn_visible = Signal(bool)
-    playlist_select_btn_text = Signal(str)
+@dataclass
+class DownloadCallbacks:
+    on_progress: Optional[Callable[[float], None]] = None
+    on_status: Optional[Callable[[str], None]] = None
+    on_finished: Optional[Callable[[], None]] = None
+    on_error: Optional[Callable[[str], None]] = None
+    on_file_exists: Optional[Callable[[str], None]] = None
+    on_details: Optional[Callable[[str], None]] = None
 
 
-class DownloadThread(QThread):
-    progress_signal = Signal(float)
-    status_signal = Signal(str)
-    finished_signal = Signal()
-    error_signal = Signal(str)
-    file_exists_signal = Signal(str)  # New signal for file existence
-    update_details = Signal(str)  # New signal for filename, speed, ETA
+class CallbackSignal:
+    def __init__(self, callback: Optional[Callable[..., None]] = None) -> None:
+        self._callback = callback
+
+    def emit(self, *args) -> None:
+        if not self._callback:
+            return
+        try:
+            self._callback(*args)
+        except Exception:
+            logger.exception("Download callback failed")
+
+    def set_callback(self, callback: Optional[Callable[..., None]]) -> None:
+        self._callback = callback
+
+
+class DownloadThread:
 
     def __init__(
         self,
@@ -66,8 +77,11 @@ class DownloadThread(QThread):
         preferred_output_format="mp4",
         force_audio_format=False,
         preferred_audio_format="best",
+        format_selector: Optional[str] = None,
+        js_runtimes: Optional[str] = None,
+        callbacks: Optional[DownloadCallbacks] = None,
     ) -> None:
-        super().__init__()
+        self._thread: Optional[threading.Thread] = None
         self.url = url
         self.path = Path(path)
         self.format_id = format_id
@@ -93,6 +107,8 @@ class DownloadThread(QThread):
         self.preferred_output_format = preferred_output_format
         self.force_audio_format = force_audio_format
         self.preferred_audio_format = preferred_audio_format
+        self.format_selector = format_selector
+        self.js_runtimes = js_runtimes
         self.paused: bool = False
         self.cancelled: bool = False
         self.process: Optional[subprocess.Popen] = None
@@ -100,6 +116,23 @@ class DownloadThread(QThread):
         self.last_file_path: Optional[str] = None  # Initialize full file path storage
         self.subtitle_files: List[str] = []  # Track subtitle files that are created
         self.initial_subtitle_files: Set[Path] = set()  # Track initial subtitle files before download
+        callbacks = callbacks or DownloadCallbacks()
+        self.progress_signal = CallbackSignal(callbacks.on_progress)
+        self.status_signal = CallbackSignal(callbacks.on_status)
+        self.finished_signal = CallbackSignal(callbacks.on_finished)
+        self.error_signal = CallbackSignal(callbacks.on_error)
+        self.file_exists_signal = CallbackSignal(callbacks.on_file_exists)
+        self.update_details = CallbackSignal(callbacks.on_details)
+
+    def start(self, daemon: bool = True) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self.run, daemon=daemon)
+        self._thread.start()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        if self._thread:
+            self._thread.join(timeout)
 
     def cleanup_partial_files(self) -> None:
         """Delete any partial files including .part and unmerged format-specific files"""
@@ -221,8 +254,12 @@ class DownloadThread(QThread):
         cmd: List[str] = [yt_dlp_path]
         logger.debug(f"Using yt-dlp from: {yt_dlp_path}")
 
-        # Format selection strategy - use format ID if provided or fallback to resolution
-        if self.format_id:
+        # Format selection strategy - allow explicit format selector override
+        if self.format_selector:
+            cmd.extend(["-f", self.format_selector])
+            logger.debug(f"Using custom format selector: {self.format_selector}")
+        # Use format ID if provided or fallback to resolution
+        elif self.format_id:
             clean_format_id: str = self.format_id.split("-drc")[0] if "-drc" in self.format_id else self.format_id
 
             # If the selected format is audio-only, pass it directly.
@@ -239,7 +276,13 @@ class DownloadThread(QThread):
         else:
             # If no specific format ID, use resolution-based sorting (-S)
             res_value: str = self.resolution if self.resolution else "720"  # Default to 720p if no resolution specified
-            cmd.extend(["-S", f"res:{res_value}"])
+
+            # If ffmpeg is not available, prefer progressive formats to avoid merge failures
+            if not self.is_audio_only and not check_ffmpeg_installed():
+                cmd.extend(["-f", f"best[height<={res_value}][ext=mp4]/best[height<={res_value}]/best"])
+                logger.debug("FFmpeg not found; using progressive format selection to avoid merging")
+            else:
+                cmd.extend(["-S", f"res:{res_value}"])
 
         # Force output format if enabled and merging is needed (for video)
         if self.force_output_format and not self.is_audio_only:
@@ -334,6 +377,10 @@ class DownloadThread(QThread):
         if self.rate_limit:
             cmd.extend(["-r", self.rate_limit])
 
+        # Add JS runtime if specified (for sites that require it)
+        if self.js_runtimes:
+            cmd.extend(["--js-runtimes", self.js_runtimes])
+
         # Add download section if specified
         if self.download_section:
             cmd.extend(["--download-sections", self.download_section])
@@ -403,8 +450,12 @@ class DownloadThread(QThread):
 
             self.process = subprocess.Popen(cmd, **popen_kwargs)
 
+            output_buffer = deque(maxlen=25)
+
             # Process output line by line to update progress
             for line in iter(self.process.stdout.readline, ""):  # type: ignore
+                if line:
+                    output_buffer.append(line.rstrip())
                 if self.cancelled:
                     # Kill the entire process tree (yt-dlp + ffmpeg children)
                     self._terminate_process_tree(self.process)
@@ -506,9 +557,10 @@ class DownloadThread(QThread):
                     self.status_signal.emit(_("download.cancelled"))
                 else:
                     # Provide more descriptive error message for possible yt-dlp conflicts
-                    if return_code == 1:
+                    output_tail = "\n".join(output_buffer).strip()
+                    if output_tail:
                         self.error_signal.emit(
-                            f"Download failed with return code {return_code}. This may be due to a conflict with multiple yt-dlp installations. Try uninstalling any system-installed yt-dlp (e.g. through snap or apt) and restart the application."
+                            f"Download failed with return code {return_code}.\nLast output:\n{output_tail}"
                         )
                     else:
                         self.error_signal.emit(f"Download failed with return code {return_code}")
