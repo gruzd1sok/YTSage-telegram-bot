@@ -92,8 +92,20 @@ def _get_config(context: ContextTypes.DEFAULT_TYPE) -> BotConfig:
 def _is_allowed(update: Update, config: BotConfig) -> bool:
     if not config.allowed_chat_ids:
         return True
+    user_id = update.effective_user.id if update.effective_user else None
     chat_id = update.effective_chat.id if update.effective_chat else None
-    return chat_id in config.allowed_chat_ids
+    return (user_id in config.allowed_chat_ids) or (chat_id in config.allowed_chat_ids)
+
+
+async def _ensure_allowed(update: Update, config: BotConfig) -> bool:
+    if _is_allowed(update, config):
+        return True
+    message = update.effective_message
+    if message:
+        await message.reply_text(
+            "Доступ к бета-версии выдает автор: @gruzd1sok. Напишите ему, чтобы получить доступ."
+        )
+    return False
 
 
 def _extract_url(text: Optional[str]) -> Optional[str]:
@@ -163,7 +175,7 @@ def _probe_video_dimensions(path: Path) -> Optional[Tuple[int, int]]:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = _get_config(context)
-    if not _is_allowed(update, config):
+    if not await _ensure_allowed(update, config):
         return
     message = (
         "Send /download <url> to fetch a video or /audio <url> for audio-only.\n"
@@ -178,7 +190,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = _get_config(context)
-    if not _is_allowed(update, config):
+    if not await _ensure_allowed(update, config):
         return
     url = _extract_url(" ".join(context.args)) or _extract_url(update.message.text)
     if not url:
@@ -190,7 +202,7 @@ async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def audio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = _get_config(context)
-    if not _is_allowed(update, config):
+    if not await _ensure_allowed(update, config):
         return
     url = _extract_url(" ".join(context.args)) or _extract_url(update.message.text)
     if not url:
@@ -202,7 +214,7 @@ async def audio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = _get_config(context)
-    if not _is_allowed(update, config):
+    if not await _ensure_allowed(update, config):
         return
     url = _extract_url(update.message.text)
     if not url:

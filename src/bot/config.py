@@ -1,10 +1,15 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set
 
 from src.utils.ytsage_config_manager import ConfigManager
 from src.utils.ytsage_logger import logger
+
+
+ID_SPLIT_RE = re.compile(r"[,\s]+")
+DEFAULT_WHITELIST_PATH = Path(__file__).resolve().parents[2] / "whitelist.txt"
 
 
 @dataclass(frozen=True)
@@ -25,18 +30,35 @@ class BotConfig:
     auto_setup_deno: bool
 
 
-def _parse_int_set(raw: Optional[str]) -> Optional[Set[int]]:
-    if not raw:
-        return None
+def _parse_id_tokens(raw: str, source: str) -> Set[int]:
     values = set()
-    for part in raw.split(","):
+    for part in ID_SPLIT_RE.split(raw):
         part = part.strip()
         if not part:
             continue
         try:
             values.add(int(part))
         except ValueError:
-            logger.warning(f"Invalid chat id in YTSAGE_ALLOWED_CHAT_IDS: {part}")
+            logger.warning(f"Invalid user id in {source}: {part}")
+    return values
+
+
+def _parse_int_set(raw: Optional[str]) -> Optional[Set[int]]:
+    if not raw:
+        return None
+    values = _parse_id_tokens(raw, "YTSAGE_ALLOWED_CHAT_IDS")
+    return values or None
+
+
+def _load_whitelist(path: Path) -> Optional[Set[int]]:
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning(f"Failed to read whitelist file {path}: {exc}")
+        return None
+    values = _parse_id_tokens(raw, str(path))
     return values or None
 
 
@@ -54,7 +76,22 @@ def load_config() -> BotConfig:
     download_dir.mkdir(parents=True, exist_ok=True)
 
     max_upload_mb = int(os.environ.get("YTSAGE_MAX_UPLOAD_MB", "49"))
-    allowed_chat_ids = _parse_int_set(os.environ.get("YTSAGE_ALLOWED_CHAT_IDS"))
+    whitelist_path_raw = os.environ.get("YTSAGE_WHITELIST_PATH", "").strip()
+    whitelist_path = (
+        Path(whitelist_path_raw).expanduser().resolve()
+        if whitelist_path_raw
+        else DEFAULT_WHITELIST_PATH
+    )
+    allowed_chat_ids_env = _parse_int_set(os.environ.get("YTSAGE_ALLOWED_CHAT_IDS"))
+    allowed_chat_ids_file = _load_whitelist(whitelist_path)
+    if allowed_chat_ids_env or allowed_chat_ids_file:
+        allowed_chat_ids = set()
+        if allowed_chat_ids_file:
+            allowed_chat_ids |= allowed_chat_ids_file
+        if allowed_chat_ids_env:
+            allowed_chat_ids |= allowed_chat_ids_env
+    else:
+        allowed_chat_ids = None
     cleanup_after_send = os.environ.get("YTSAGE_CLEANUP_AFTER_SEND", "true").lower() in {"1", "true", "yes"}
 
     default_resolution = os.environ.get("YTSAGE_DEFAULT_RESOLUTION", "720").strip() or "720"
