@@ -24,6 +24,10 @@ python main.py
 - `YTSAGE_DOWNLOAD_DIR` (optional): download directory (defaults to config or ~/Downloads)
 - `YTSAGE_MAX_UPLOAD_MB` (optional): max upload size for Telegram (default: 49)
 - `YTSAGE_ALLOWED_CHAT_IDS` (optional): comma-separated chat IDs allowlist
+- `YTSAGE_WHITELIST_PATH` (optional): path to whitelist file (default: ./whitelist.txt)
+- `YTSAGE_BETA_ENABLED` (optional): enable manual beta access flow (default: false)
+- `YTSAGE_ADMIN_CHAT_ID` (optional): admin chat/user ID for beta approvals
+- `YTSAGE_ATTEMPTS_LOG_PATH` (optional): file path to store IDs of users who attempted to use the bot (default: ./attempts.txt)
 - `YTSAGE_CLEANUP_AFTER_SEND` (optional): delete files after upload (default: true)
 - `YTSAGE_DEFAULT_RESOLUTION` (optional): default resolution for video (default: 720)
 - `YTSAGE_FORCE_AUDIO_FORMAT` (optional): convert audio on download (default: false)
@@ -37,6 +41,7 @@ python main.py
 - `YTSAGE_COOKIE_REFRESH_COMMAND` (optional): shell command to regenerate cookies file
 - `YTSAGE_JS_RUNTIME` (optional): JS runtime string for yt-dlp (e.g. `deno:/path/to/deno`)
 - `YTSAGE_AUTO_SETUP_DENO` (optional): auto-download Deno for JS runtime (default: true)
+- `YTSAGE_TELEGRAM_MEDIA_WRITE_TIMEOUT` (optional): upload write timeout for media uploads in seconds (default: 120)
 
 ## Notes
 - The bot relies on `yt-dlp` and `ffmpeg` available on PATH or in the YTSage app bin directory.

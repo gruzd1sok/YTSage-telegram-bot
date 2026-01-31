@@ -10,6 +10,7 @@ from src.utils.ytsage_logger import logger
 
 ID_SPLIT_RE = re.compile(r"[,\s]+")
 DEFAULT_WHITELIST_PATH = Path(__file__).resolve().parents[2] / "whitelist.txt"
+DEFAULT_ATTEMPTS_LOG_PATH = Path(__file__).resolve().parents[2] / "attempts.txt"
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,11 @@ class BotConfig:
     download_dir: Path
     max_upload_mb: int
     allowed_chat_ids: Optional[Set[int]]
+    whitelist_path: Path
+    attempts_log_path: Path
     cleanup_after_send: bool
+    beta_enabled: bool
+    admin_chat_id: Optional[int]
     default_resolution: str
     force_audio_format: bool
     preferred_audio_format: str
@@ -31,6 +36,18 @@ class BotConfig:
     cookie_refresh_command: Optional[str]
     js_runtime: Optional[str]
     auto_setup_deno: bool
+    telegram_media_write_timeout: float
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(f"Invalid {name} value; using default {default}")
+        return default
 
 
 def _parse_id_tokens(raw: str, source: str) -> Set[int]:
@@ -95,6 +112,20 @@ def load_config() -> BotConfig:
             allowed_chat_ids |= allowed_chat_ids_env
     else:
         allowed_chat_ids = None
+    beta_enabled = os.environ.get("YTSAGE_BETA_ENABLED", "false").lower() in {"1", "true", "yes"}
+    admin_chat_id_raw = os.environ.get("YTSAGE_ADMIN_CHAT_ID", "").strip()
+    admin_chat_id: Optional[int] = None
+    if admin_chat_id_raw:
+        try:
+            admin_chat_id = int(admin_chat_id_raw)
+        except ValueError:
+            logger.warning("Invalid YTSAGE_ADMIN_CHAT_ID value; ignoring")
+    attempts_log_path_raw = os.environ.get("YTSAGE_ATTEMPTS_LOG_PATH", "").strip()
+    attempts_log_path = (
+        Path(attempts_log_path_raw).expanduser().resolve()
+        if attempts_log_path_raw
+        else DEFAULT_ATTEMPTS_LOG_PATH
+    )
     cleanup_after_send = os.environ.get("YTSAGE_CLEANUP_AFTER_SEND", "true").lower() in {"1", "true", "yes"}
 
     default_resolution = os.environ.get("YTSAGE_DEFAULT_RESOLUTION", "720").strip() or "720"
@@ -116,13 +147,18 @@ def load_config() -> BotConfig:
             logger.warning("Invalid YTSAGE_COOKIE_REFRESH_MAX_AGE_HOURS value; ignoring")
     js_runtime = os.environ.get("YTSAGE_JS_RUNTIME", "").strip() or None
     auto_setup_deno = os.environ.get("YTSAGE_AUTO_SETUP_DENO", "true").lower() in {"1", "true", "yes"}
+    telegram_media_write_timeout = _parse_float_env("YTSAGE_TELEGRAM_MEDIA_WRITE_TIMEOUT", 120.0)
 
     return BotConfig(
         token=token,
         download_dir=download_dir,
         max_upload_mb=max_upload_mb,
         allowed_chat_ids=allowed_chat_ids,
+        whitelist_path=whitelist_path,
+        attempts_log_path=attempts_log_path,
         cleanup_after_send=cleanup_after_send,
+        beta_enabled=beta_enabled,
+        admin_chat_id=admin_chat_id,
         default_resolution=default_resolution,
         force_audio_format=force_audio_format,
         preferred_audio_format=preferred_audio_format,
@@ -135,4 +171,5 @@ def load_config() -> BotConfig:
         cookie_refresh_command=cookie_refresh_command,
         js_runtime=js_runtime,
         auto_setup_deno=auto_setup_deno,
+        telegram_media_write_timeout=telegram_media_write_timeout,
     )

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,6 +17,39 @@ from src.utils.ytsage_constants import (
 from src.utils.ytsage_logger import logger
 
 
+def _curl_path() -> Optional[str]:
+    return shutil.which("curl")
+
+
+def _download_text_with_curl(url: str, timeout: int = 30) -> str:
+    curl = _curl_path()
+    if not curl:
+        raise RuntimeError("curl is not available")
+    result = subprocess.run(
+        [curl, "-fL", url],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def _download_file_with_curl(url: str, dest: Path, timeout: int = 120) -> None:
+    curl = _curl_path()
+    if not curl:
+        raise RuntimeError("curl is not available")
+    result = subprocess.run(
+        [curl, "-fL", "-o", str(dest), url],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl failed: {result.stderr.strip()}")
+
+
 def verify_ytdlp_sha256(file_path: Path, download_url: str) -> bool:
     """
     Verify yt-dlp file SHA256 hash against official checksums.
@@ -29,9 +63,17 @@ def verify_ytdlp_sha256(file_path: Path, download_url: str) -> bool:
     """
     try:
         logger.info(f"Downloading SHA256 checksums from: {YTDLP_SHA256_URL}")
-        response = requests.get(YTDLP_SHA256_URL, timeout=10)
-        response.raise_for_status()
-        checksum_content = response.text
+        try:
+            response = requests.get(YTDLP_SHA256_URL, timeout=10)
+            response.raise_for_status()
+            checksum_content = response.text
+        except requests.RequestException as exc:
+            logger.warning(f"Failed to download checksums via requests: {exc}")
+            try:
+                checksum_content = _download_text_with_curl(YTDLP_SHA256_URL, timeout=30)
+            except Exception as curl_exc:
+                logger.error(f"Failed to download checksums via curl: {curl_exc}")
+                return False
 
         filename = download_url.split("/")[-1]
         logger.info(f"Looking for checksum for file: {filename}")
@@ -72,21 +114,29 @@ def download_ytdlp(progress_callback: Optional[Callable[[int], None]] = None) ->
     exe_path = YTDLP_APP_BIN_PATH
     logger.info(f"Downloading yt-dlp from: {YTDLP_DOWNLOAD_URL}")
 
-    response = requests.get(YTDLP_DOWNLOAD_URL, stream=True, timeout=30)
-    response.raise_for_status()
-    total_size = int(response.headers.get("content-length", 0))
-    block_size = 1024
+    try:
+        response = requests.get(YTDLP_DOWNLOAD_URL, stream=True, timeout=30)
+        response.raise_for_status()
+        total_size = int(response.headers.get("content-length", 0))
+        block_size = 1024
 
-    if total_size == 0 and progress_callback:
-        progress_callback(100)
+        if total_size == 0 and progress_callback:
+            progress_callback(100)
 
-    with open(exe_path, "wb") as f:
-        downloaded = 0
-        for data in response.iter_content(block_size):
-            f.write(data)
-            downloaded += len(data)
-            if total_size > 0 and progress_callback:
-                progress_callback(int(downloaded / total_size * 100))
+        with open(exe_path, "wb") as f:
+            downloaded = 0
+            for data in response.iter_content(block_size):
+                f.write(data)
+                downloaded += len(data)
+                if total_size > 0 and progress_callback:
+                    progress_callback(int(downloaded / total_size * 100))
+    except requests.RequestException as exc:
+        logger.warning(f"Failed to download yt-dlp via requests: {exc}")
+        if exe_path.exists():
+            exe_path.unlink()
+        _download_file_with_curl(YTDLP_DOWNLOAD_URL, exe_path, timeout=120)
+        if progress_callback:
+            progress_callback(100)
 
     logger.info("Download complete, verifying SHA256 hash...")
     if not verify_ytdlp_sha256(exe_path, YTDLP_DOWNLOAD_URL):
